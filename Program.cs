@@ -1,9 +1,28 @@
+using ae_reporting.api.Data;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// 1. Add CORS (so Vue can call this API locally)
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowVueFrontend", policy =>
+    {
+        // Vite defaults to localhost:5173
+        policy.WithOrigins("http://localhost:5173") 
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
+// 2. Add PostgreSQL Database Context
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(connectionString));
 
 var app = builder.Build();
 
@@ -16,29 +35,21 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+app.UseCors("AllowVueFrontend");
 
-app.MapGet("/weatherforecast", () =>
+// 3. Create our "Hello World" endpoint!
+app.MapGet("/api/hello", async (AppDbContext db) =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
+    // Try to get a message, or return a default one if the table does not exist yet
+    try
+    {
+        var message = await db.HelloMessages.FirstOrDefaultAsync();
+        return Results.Ok(message ?? new ae_reporting.api.Models.HelloMessage { Id = 0, Text = "Hello from PostgreSQL + .NET 8!" });
+    }
+    catch
+    {
+        return Results.Ok(new ae_reporting.api.Models.HelloMessage { Id = -1, Text = "Cannot connect to database or tables are not created yet!" });
+    }
+});
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
