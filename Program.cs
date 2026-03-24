@@ -1,4 +1,5 @@
 using ae_reporting.api.Data;
+using ae_reporting.api.Models;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -7,19 +8,19 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// 1. Add CORS (so Vue can call this API locally)
+// Add CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowVueFrontend", policy =>
     {
-        // Vite defaults to localhost:5173
-        policy.WithOrigins("http://localhost:5173") 
+        var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? new[] { "http://localhost:5173" };
+        policy.WithOrigins(allowedOrigins) 
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
 });
 
-// 2. Add PostgreSQL Database Context
+// Add PostgreSQL Database Context
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
@@ -34,22 +35,37 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
 app.UseCors("AllowVueFrontend");
 
-// 3. Create our "Hello World" endpoint!
-app.MapGet("/api/hello", async (AppDbContext db) =>
+// API Endpoints
+
+// GET Patient by ID
+app.MapGet("/api/patients/{patientId}", async (string patientId, AppDbContext db) =>
 {
-    // Try to get a message, or return a default one if the table does not exist yet
-    try
+    var patient = await db.Patients.FirstOrDefaultAsync(p => p.PatientId == patientId);
+    if (patient == null) return Results.NotFound();
+    
+    return Results.Ok(new { fullName = $"{patient.FirstName} {patient.LastName}" });
+});
+
+// POST Adverse Event
+app.MapPost("/api/adverse-events", async (AdverseEvent ae, AppDbContext db) =>
+{
+    if (string.IsNullOrEmpty(ae.PatientId) || string.IsNullOrEmpty(ae.Description) || 
+        string.IsNullOrEmpty(ae.Severity) || string.IsNullOrEmpty(ae.RelationshipToStudyDrug))
     {
-        var message = await db.HelloMessages.FirstOrDefaultAsync();
-        return Results.Ok(message ?? new ae_reporting.api.Models.HelloMessage { Id = 0, Text = "Hello from PostgreSQL + .NET 8!" });
+        return Results.BadRequest("All fields are required.");
     }
-    catch
+
+    if (ae.DateOfOnset > DateTime.UtcNow)
     {
-        return Results.Ok(new ae_reporting.api.Models.HelloMessage { Id = -1, Text = "Cannot connect to database or tables are not created yet!" });
+        return Results.BadRequest("Date of onset cannot be in the future.");
     }
+
+    db.AdverseEvents.Add(ae);
+    await db.SaveChangesAsync();
+    
+    return Results.Created($"/api/adverse-events/{ae.Id}", ae);
 });
 
 app.Run();
