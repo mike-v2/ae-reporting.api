@@ -42,10 +42,20 @@ app.UseCors("AllowVueFrontend");
 // GET Patient by ID
 app.MapGet("/api/patients/{patientId}", async (string patientId, AppDbContext db) =>
 {
-    var patient = await db.Patients.FirstOrDefaultAsync(p => p.PatientId == patientId);
-    if (patient == null) return Results.NotFound();
-    
-    return Results.Ok(new { fullName = $"{patient.FirstName} {patient.LastName}" });
+    // Using try/catch here for convenience
+    // In a real app I would replace this with global exception handling middleware
+    try
+    {
+        var patient = await db.Patients.FirstOrDefaultAsync(p => p.PatientId == patientId);
+        if (patient == null) return Results.NotFound();
+        
+        return Results.Ok(new { fullName = $"{patient.FirstName} {patient.LastName}" });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Database Query Error: {ex.Message}");
+        return Results.Problem("An error occurred while fetching the patient data.");
+    }
 });
 
 // POST Adverse Event
@@ -57,15 +67,27 @@ app.MapPost("/api/adverse-events", async (AdverseEvent ae, AppDbContext db) =>
         return Results.BadRequest("All fields are required.");
     }
 
+    ae.DateOfOnset = DateTime.SpecifyKind(ae.DateOfOnset, DateTimeKind.Utc);
+
     if (ae.DateOfOnset > DateTime.UtcNow)
     {
         return Results.BadRequest("Date of onset cannot be in the future.");
     }
 
-    db.AdverseEvents.Add(ae);
-    await db.SaveChangesAsync();
-    
-    return Results.Created($"/api/adverse-events/{ae.Id}", ae);
+    // Using try/catch here for convenience
+    // In a real app I would replace this with global exception handling middleware
+    try 
+    {
+        db.AdverseEvents.Add(ae);
+        await db.SaveChangesAsync();
+        
+        return Results.Created($"/api/adverse-events/{ae.Id}", ae);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Database Save Error: {ex.Message}");
+        return Results.Problem("An error occurred while saving the event.");
+    }
 });
 
 app.Run();
